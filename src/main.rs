@@ -1,15 +1,16 @@
 pub mod board;
+mod board2;
 pub mod cell;
 pub mod player;
 
 use std::{collections::HashMap, fmt::Debug};
 
-use board::BoardState;
+use board2::Board2;
 use player::Player;
 
 struct SearchResult {
     pub score: i32,
-    pub best_path: Vec<BoardState>,
+    pub best_path: Vec<Board2>,
 }
 
 impl Debug for SearchResult {
@@ -23,8 +24,8 @@ impl Debug for SearchResult {
 }
 
 struct SearchState {
-    transposition_table: Vec<HashMap<BoardState, (i32, BoardState)>>,
-    next_transposition_table: Vec<HashMap<BoardState, (i32, BoardState)>>,
+    transposition_table: Vec<HashMap<Board2, (i32, Board2)>>,
+    next_transposition_table: Vec<HashMap<Board2, (i32, Board2)>>,
     same_search_transposition_hits: Vec<usize>,
     nodes_searched: Vec<usize>,
     max_depth: usize,
@@ -39,43 +40,38 @@ impl SearchState {
             same_search_transposition_hits: Vec::new(),
             nodes_searched: Vec::new(),
             max_depth: 0,
-            max_transposition_table_depth: 10,
+            max_transposition_table_depth: 20,
         }
     }
 
     fn alpha_beta(
         &mut self,
-        state: BoardState,
-        maximizing: bool,
+        state: Board2,
         depth: usize,
         mut alpha: i32,
         mut beta: i32,
     ) -> SearchResult {
-        if depth >= self.max_depth {
+        if depth >= self.max_depth || state.ended() {
             return SearchResult {
                 score: state.score(),
                 best_path: vec![state],
             };
         }
-        // if let Some(result) = self.next_transposition_table[depth].get(&state) {
-        //     self.same_search_transposition_hits[depth] += 1;
-        //     return SearchResult {
-        //         score: result.0,
-        //         best_path: vec![result.1.clone(), state],
-        //     };
-        // }
+        if let Some(result) = self.next_transposition_table[depth].get(&state) {
+            self.same_search_transposition_hits[depth] += 1;
+            return SearchResult {
+                score: result.0,
+                best_path: vec![result.1.clone(), state],
+            };
+        }
 
         self.nodes_searched[depth] += 1;
 
+        let maximizing = state.maximizing();
         let mut best_path = Vec::new();
         let mut best_score = if maximizing { i32::MIN } else { i32::MAX };
-        let player = if maximizing {
-            Player::White
-        } else {
-            Player::Black
-        };
 
-        let mut moves = state.next_moves(player);
+        let mut moves = state.all_moves();
         if moves.is_empty() {
             return SearchResult {
                 score: if maximizing { -100000 } else { 100000 },
@@ -101,7 +97,7 @@ impl SearchState {
             let SearchResult {
                 score,
                 best_path: best_subpath,
-            } = self.alpha_beta(next_state, !maximizing, depth + 1, alpha, beta);
+            } = self.alpha_beta(next_state, depth + 1, alpha, beta);
             if maximizing {
                 if score > best_score {
                     best_score = score;
@@ -124,12 +120,10 @@ impl SearchState {
                 break;
             }
         }
-        if depth < self.max_transposition_table_depth
-        /*&& !any_child_pruned*/
-        {
+        if depth < self.max_transposition_table_depth && !any_child_pruned {
             self.next_transposition_table[depth].insert(
                 state.clone(),
-                (best_score, best_path.last().cloned().unwrap()),
+                (best_score, best_path.last().copied().unwrap()),
             );
         }
 
@@ -174,14 +168,12 @@ fn run() {
     let mut search_state = SearchState::new();
     loop {
         search_state.next_depth();
-        let result = search_state.alpha_beta(
-            BoardState::new_with_king_inversed(),
-            true,
-            0,
-            i32::MIN,
-            i32::MAX,
-        );
+        let result =
+            search_state.alpha_beta(Board2::new_with_king_inversed(), 0, i32::MIN, i32::MAX);
         println!("Depth {} result: {:?}", search_state.max_depth, result);
+        if result.score == -100000 || result.score == 100000 {
+            break;
+        }
     }
 }
 
