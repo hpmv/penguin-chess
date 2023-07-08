@@ -57,13 +57,13 @@ impl SearchState {
                 best_path: vec![state],
             };
         }
-        if let Some(result) = self.next_transposition_table[depth].get(&state) {
-            self.same_search_transposition_hits[depth] += 1;
-            return SearchResult {
-                score: result.0,
-                best_path: vec![result.1.clone(), state],
-            };
-        }
+        // if let Some(result) = self.next_transposition_table[depth].get(&state) {
+        //     self.same_search_transposition_hits[depth] += 1;
+        //     return SearchResult {
+        //         score: result.0,
+        //         best_path: vec![result.1.clone(), state],
+        //     };
+        // }
 
         self.nodes_searched[depth] += 1;
 
@@ -96,6 +96,7 @@ impl SearchState {
             }
         });
 
+        let mut any_child_pruned = false;
         for next_state in moves.into_iter() {
             let SearchResult {
                 score,
@@ -119,10 +120,13 @@ impl SearchState {
                 }
             }
             if alpha >= beta {
+                any_child_pruned = true;
                 break;
             }
         }
-        if depth < self.max_transposition_table_depth {
+        if depth < self.max_transposition_table_depth
+        /*&& !any_child_pruned*/
+        {
             self.next_transposition_table[depth].insert(
                 state.clone(),
                 (best_score, best_path.last().cloned().unwrap()),
