@@ -2,130 +2,183 @@ pub mod board;
 pub mod cell;
 pub mod player;
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-};
+use std::{collections::HashMap, fmt::Debug};
 
 use board::BoardState;
 use player::Player;
 
 struct SearchResult {
-    pub winner: Option<Player>,
-    pub best_move: usize,
+    pub score: i32,
+    pub best_path: Vec<BoardState>,
 }
 
-#[derive(Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct GameState {
-    board: BoardState,
-    player: Player,
-}
-
-impl GameState {
-    pub fn new() -> GameState {
-        GameState {
-            board: BoardState::new(),
-            player: Player::White,
-        }
-    }
-
-    pub fn next_moves(&self) -> Vec<GameState> {
-        self.board
-            .next_moves(self.player)
-            .into_iter()
-            .map(|board| GameState {
-                board,
-                player: self.player.opponent(),
-            })
-            .collect()
-    }
-
-    pub fn winner(&self) -> Option<Player> {
-        self.board.winner()
-    }
-}
-
-impl Debug for GameState {
+impl Debug for SearchResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}\n{:?}", self.player, self.board)
+        write!(f, "{:?}\n", self.score)?;
+        for state in self.best_path.iter() {
+            write!(f, "{:?}\n", state)?;
+        }
+        Ok(())
     }
 }
 
 struct SearchState {
-    optimal: HashMap<GameState, SearchResult>,
-    visiting: HashSet<GameState>,
+    transposition_table: Vec<HashMap<BoardState, (i32, BoardState)>>,
+    next_transposition_table: Vec<HashMap<BoardState, (i32, BoardState)>>,
+    same_search_transposition_hits: Vec<usize>,
+    nodes_searched: Vec<usize>,
+    max_depth: usize,
+    max_transposition_table_depth: usize,
 }
 
 impl SearchState {
     pub fn new() -> SearchState {
         SearchState {
-            optimal: HashMap::new(),
-            visiting: HashSet::new(),
+            transposition_table: Vec::new(),
+            next_transposition_table: Vec::new(),
+            same_search_transposition_hits: Vec::new(),
+            nodes_searched: Vec::new(),
+            max_depth: 0,
+            max_transposition_table_depth: 10,
         }
     }
 
-    fn search(&mut self, state: GameState, depth: usize) {
-        if self.optimal.contains_key(&state) {
-            return;
-        }
-        if let Some(winner) = state.winner() {
-            self.optimal.insert(
-                state,
-                SearchResult {
-                    winner: Some(winner),
-                    best_move: 0,
-                },
-            );
-            return;
-        }
-
-        // println!("Searching state at depth {}", depth);
-        // println!("{:?}", state);
-
-        self.visiting.insert(state.clone());
-        let mut best_move = 0;
-        let mut best_score = 0;
-        for (i, next_state) in state.next_moves().iter().enumerate() {
-            if self.visiting.contains(next_state) {
-                continue;
-            }
-            self.search(next_state.clone(), depth + 1);
-            let score = match self.optimal.get(&next_state).unwrap().winner {
-                Some(winner) => {
-                    if winner == state.player {
-                        1
-                    } else {
-                        -1
-                    }
-                }
-                _ => 0,
+    fn alpha_beta(
+        &mut self,
+        state: BoardState,
+        maximizing: bool,
+        depth: usize,
+        mut alpha: i32,
+        mut beta: i32,
+    ) -> SearchResult {
+        if depth >= self.max_depth {
+            return SearchResult {
+                score: state.score(),
+                best_path: vec![state],
             };
-            if score > best_score {
-                best_score = score;
-                best_move = i;
+        }
+        if let Some(result) = self.next_transposition_table[depth].get(&state) {
+            self.same_search_transposition_hits[depth] += 1;
+            return SearchResult {
+                score: result.0,
+                best_path: vec![result.1.clone(), state],
+            };
+        }
+
+        self.nodes_searched[depth] += 1;
+
+        let mut best_path = Vec::new();
+        let mut best_score = if maximizing { i32::MIN } else { i32::MAX };
+        let player = if maximizing {
+            Player::White
+        } else {
+            Player::Black
+        };
+
+        let mut moves = state.next_moves(player);
+        if moves.is_empty() {
+            return SearchResult {
+                score: if maximizing { -100000 } else { 100000 },
+                best_path: vec![state],
+            };
+        }
+        let prev_best_move = self.transposition_table[depth].get(&state);
+        moves.sort_by_key(|state| {
+            if let Some((_, prev_best_move)) = prev_best_move {
+                if state == prev_best_move {
+                    return -10000000;
+                }
+            }
+            if maximizing {
+                -state.score()
+            } else {
+                state.score()
+            }
+        });
+
+        for next_state in moves.into_iter() {
+            let SearchResult {
+                score,
+                best_path: best_subpath,
+            } = self.alpha_beta(next_state, !maximizing, depth + 1, alpha, beta);
+            if maximizing {
+                if score > best_score {
+                    best_score = score;
+                    best_path = best_subpath;
+                }
+                if score > alpha {
+                    alpha = score;
+                }
+            } else {
+                if score < best_score {
+                    best_score = score;
+                    best_path = best_subpath;
+                }
+                if score < beta {
+                    beta = score;
+                }
+            }
+            if alpha >= beta {
+                break;
             }
         }
-        self.optimal.insert(
-            state.clone(),
-            SearchResult {
-                winner: if best_score == 1 {
-                    Some(state.player)
-                } else if best_score == -1 {
-                    Some(state.player.opponent())
-                } else {
-                    None
-                },
-                best_move,
-            },
+        if depth < self.max_transposition_table_depth {
+            self.next_transposition_table[depth].insert(
+                state.clone(),
+                (best_score, best_path.last().cloned().unwrap()),
+            );
+        }
+
+        best_path.push(state);
+
+        SearchResult {
+            score: best_score,
+            best_path,
+        }
+    }
+
+    fn next_depth(&mut self) {
+        std::mem::swap(
+            &mut self.transposition_table,
+            &mut self.next_transposition_table,
         );
-        self.visiting.remove(&state);
+        for i in 0..self.max_depth {
+            self.next_transposition_table[i].clear();
+        }
+        self.transposition_table.push(HashMap::new());
+        self.next_transposition_table.push(HashMap::new());
+
+        self.max_depth += 1;
+        self.same_search_transposition_hits.push(0);
+        self.nodes_searched.push(0);
+
+        for i in 0..self.max_depth {
+            println!(
+                "Depth {} transposition hits: {} / {}, table size = {}",
+                i,
+                self.same_search_transposition_hits[i],
+                self.nodes_searched[i],
+                self.transposition_table[i].len(),
+            );
+            self.same_search_transposition_hits[i] = 0;
+            self.nodes_searched[i] = 0;
+        }
     }
 }
 
 fn run() {
     let mut search_state = SearchState::new();
-    search_state.search(GameState::new(), 0);
-    // println!("{:?}", search_state.optimal);
+    loop {
+        search_state.next_depth();
+        let result = search_state.alpha_beta(
+            BoardState::new_with_king_inversed(),
+            true,
+            0,
+            i32::MIN,
+            i32::MAX,
+        );
+        println!("Depth {} result: {:?}", search_state.max_depth, result);
+    }
 }
 
 use std::thread;

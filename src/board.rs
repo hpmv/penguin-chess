@@ -142,8 +142,21 @@ impl BoardState {
         }
     }
 
+    pub fn new_with_king_inversed() -> BoardState {
+        BoardState {
+            state: [
+                [WhitePawn, WhitePawn, BlackKing, WhitePawn, WhitePawn],
+                [Empty, Empty, Empty, Empty, Empty],
+                [Empty, Empty, Empty, Empty, Empty],
+                [Empty, Empty, Empty, Empty, Empty],
+                [BlackPawn, BlackPawn, WhiteKing, BlackPawn, BlackPawn],
+            ],
+        }
+    }
+
     pub fn make_move(&self, from: Pos, dir: Dir) -> Option<BoardState> {
         let mut new_pos = from;
+        let cell = self[from];
         while let Some(pos) = dir.apply(new_pos) {
             if self[pos] != Empty {
                 break;
@@ -153,16 +166,19 @@ impl BoardState {
         if new_pos == from {
             return None;
         }
-        if !self[new_pos].is_king() && new_pos == (2, 2) {
+        if !cell.is_king() && new_pos == (2, 2) {
             return None;
         }
         let mut new_state = self.clone();
-        new_state[new_pos] = self[from];
+        new_state[new_pos] = cell;
         new_state[from] = Empty;
         Some(new_state)
     }
 
     pub fn next_moves(&self, player: Player) -> Vec<BoardState> {
+        if self.winner().is_some() {
+            return Vec::new();
+        }
         let mut moves = Vec::new();
         for row in 0..5 {
             for col in 0..5 {
@@ -186,5 +202,44 @@ impl BoardState {
             BlackKing => Some(Player::Black),
             _ => None,
         }
+    }
+
+    const CELL_WEIGHTS_PAWN: [[i32; 5]; 5] = [
+        [0, 3, 0, 3, 0],
+        [3, 10, 10, 10, 3],
+        [0, 10, 0, 10, 0],
+        [3, 10, 10, 10, 3],
+        [0, 3, 0, 3, 0],
+    ];
+
+    const CELL_WEIGHTS_KING: [[i32; 5]; 5] = [
+        [10, 0, 10, 0, 10],
+        [0, 20, 20, 20, 0],
+        [10, 20, 0, 20, 10],
+        [0, 20, 20, 20, 0],
+        [10, 0, 10, 0, 10],
+    ];
+
+    pub fn score(&self) -> i32 {
+        if let Some(winner) = self.winner() {
+            return if winner == Player::White {
+                100000
+            } else {
+                -100000
+            };
+        }
+        let mut score = 0;
+        for row in 0..5 {
+            for col in 0..5 {
+                match self[(row, col)] {
+                    WhitePawn => score += Self::CELL_WEIGHTS_PAWN[row][col],
+                    BlackPawn => score -= Self::CELL_WEIGHTS_PAWN[row][col],
+                    WhiteKing => score += Self::CELL_WEIGHTS_KING[row][col],
+                    BlackKing => score -= Self::CELL_WEIGHTS_KING[row][col],
+                    _ => {}
+                };
+            }
+        }
+        score
     }
 }
