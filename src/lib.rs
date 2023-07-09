@@ -12,9 +12,9 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
 };
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_test::wasm_bindgen_test;
 
 #[derive(Clone, Serialize)]
 pub struct SearchResult {
@@ -166,7 +166,6 @@ pub struct PartialSearchResult {
     pub depth: usize,
     pub nodes_searched: usize,
     pub result: SearchResult,
-    pub time: f64,
 }
 
 pub fn find_best_move(
@@ -179,18 +178,15 @@ pub fn find_best_move(
     loop {
         search_state.next_depth();
         let depth = search_state.max_depth;
-        let start_time = Instant::now();
         match search_state.alpha_beta(state, 0, i32::MIN, i32::MAX) {
             Err(Interrupted) => {
                 break;
             }
             Ok(one_result) => {
-                let time = start_time.elapsed().as_secs_f64();
                 partial(PartialSearchResult {
                     depth,
                     nodes_searched: search_state.nodes_searched,
                     result: one_result.clone(),
-                    time,
                 });
                 let win_found = one_result.score.abs() > 10000;
                 result = Some(one_result);
@@ -233,6 +229,16 @@ impl Engine {
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+#[wasm_bindgen_test]
+fn test_basic_engine() {
+    let engine = Engine::new(js_sys::Function::default());
+    // does not terminate.
+    println!(
+        "{:?}",
+        engine.find_best_move(vec![0, 1, 3, 4, 20, 21, 23, 24, 22, 2, 1])
+    );
 }
 
 // fn analyze_board(board: Board2) -> i32 {
