@@ -3,6 +3,8 @@ use std::{
     path::Display,
 };
 
+use serde::Serialize;
+
 use crate::cell::CellState;
 
 #[derive(Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,6 +29,14 @@ impl Debug for Board2 {
 
 impl Board2 {
     pub fn new(data: u64) -> Board2 {
+        Board2 { data }
+    }
+
+    pub fn from_positions(pos: &Vec<u8>) -> Board2 {
+        let mut data = 0;
+        for (i, p) in pos.iter().enumerate() {
+            data |= (*p as u64) << (i * 5);
+        }
         Board2 { data }
     }
 
@@ -131,7 +141,7 @@ impl Board2 {
         (self.data >> 50) & 1 != 0
     }
 
-    pub fn all_moves(self) -> Vec<Board2> {
+    pub fn all_moves(self) -> Vec<(Move, Board2)> {
         let mut moves = Vec::new();
         let flat = self.flatten_to_bitarray();
         let offsets = if self.maximizing() {
@@ -140,7 +150,8 @@ impl Board2 {
             [20, 25, 30, 35, 45]
         };
         for i in offsets {
-            for ray in &MOVEMENT_TABLE[((self.data >> i) & 0b11111) as usize] {
+            let from = (self.data >> i) & 0b11111;
+            for ray in &MOVEMENT_TABLE[from as usize] {
                 let to = if ray[0] == x {
                     break; // no more directions
                 } else if flat & (1 << ray[0]) != 0 {
@@ -163,8 +174,12 @@ impl Board2 {
                 if i < 40 && to == 12 {
                     continue;
                 }
-                let m = Move { from_offset: i, to };
-                moves.push(self.do_move(m));
+                let m = Move {
+                    from_offset: i,
+                    from: from as u8,
+                    to,
+                };
+                moves.push((m, self.do_move(m)));
             }
         }
         moves
@@ -234,12 +249,34 @@ impl Board2 {
                 | 1 << 50),
         }
     }
+
+    pub fn reflect(self) -> Self {
+        let mut data = 0;
+        for i in [0, 5, 10, 15, 20, 25, 30, 35, 40, 45] {
+            let mut v = (self.data >> i) & 0b11111;
+            v = (v / 5) * 5 + (4 - (v % 5));
+            data |= v << i;
+        }
+        data |= self.data & (1 << 50);
+        Self { data }
+    }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct Move {
     from_offset: u8,
+    from: u8,
     to: u8,
+}
+
+impl Move {
+    pub fn new(from_offset: u8, from: u8, to: u8) -> Self {
+        Self {
+            from_offset,
+            from,
+            to,
+        }
+    }
 }
 
 impl Debug for Move {

@@ -309,7 +309,7 @@ impl BoardState {
     }
 }
 
-trait VecDebug {
+pub trait VecDebug {
     fn vec_debug(&self) -> String;
 }
 
@@ -346,7 +346,11 @@ pub fn test_random() {
         let (state, player) = BoardState::random();
         let moves = state.next_moves(player);
         let state2 = state.to_board2(player);
-        let moves2 = state2.all_moves();
+        let moves2 = state2
+            .all_moves()
+            .into_iter()
+            .map(|(_, b)| b)
+            .collect::<Vec<_>>();
         if moves.len() != moves2.len() {
             println!("{} {} {}", i, moves.len(), moves2.len());
             println!("{:?}", state);
