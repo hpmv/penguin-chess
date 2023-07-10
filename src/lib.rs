@@ -8,6 +8,7 @@ use serde::Serialize;
 use std::{
     collections::HashMap,
     fmt::Debug,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -39,13 +40,13 @@ struct SearchState {
     nodes_searched: usize,
     max_depth: usize,
     max_transposition_table_depth: usize,
-    stop: Arc<AtomicBool>,
+    stop: Box<dyn Fn() -> bool>,
 }
 
 struct Interrupted;
 
 impl SearchState {
-    pub fn new(stop: Arc<AtomicBool>) -> SearchState {
+    pub fn new(stop: Box<dyn Fn() -> bool>) -> SearchState {
         SearchState {
             transposition_table: HashMap::new(),
             next_transposition_table: HashMap::new(),
@@ -63,7 +64,7 @@ impl SearchState {
         mut alpha: i32,
         mut beta: i32,
     ) -> Result<SearchResult, Interrupted> {
-        if self.stop.load(Ordering::Relaxed) {
+        if (self.stop)() {
             return Err(Interrupted);
         }
         if depth >= self.max_depth || state.ended() {
@@ -170,10 +171,10 @@ pub struct PartialSearchResult {
 
 pub fn find_best_move(
     state: Board2,
-    stop: Arc<AtomicBool>,
+    stop: impl Fn() -> bool + 'static,
     partial: impl Fn(PartialSearchResult),
 ) -> Option<Move> {
-    let mut search_state = SearchState::new(stop);
+    let mut search_state = SearchState::new(Box::new(stop));
     let mut result: Option<SearchResult> = None;
     loop {
         search_state.next_depth();
@@ -201,39 +202,42 @@ pub fn find_best_move(
 
 #[wasm_bindgen]
 pub struct Engine {
-    stop: Arc<AtomicBool>,
+    stop: Rc<js_sys::Uint8Array>,
     partial: js_sys::Function,
 }
 
 #[wasm_bindgen]
 impl Engine {
     #[wasm_bindgen(constructor)]
-    pub fn new(partial: js_sys::Function) -> Engine {
+    pub fn new(stop: js_sys::Uint8Array, partial: js_sys::Function) -> Engine {
         Engine {
-            stop: Arc::new(AtomicBool::new(false)),
+            stop: Rc::new(stop),
             partial,
         }
     }
 
     pub fn find_best_move(&self, state: Vec<u8>) -> Option<String> {
-        self.stop.store(false, Ordering::Relaxed);
         let state = Board2::from_positions(&state);
-        let m = find_best_move(state, self.stop.clone(), |result| {
-            let m = serde_json::to_string(&result).unwrap();
-            let m = JsValue::from_str(&m);
-            self.partial.call1(&JsValue::NULL, &m).unwrap();
-        });
+        let stop = self.stop.clone();
+        let m = find_best_move(
+            state,
+            move || js_sys::Atomics::load(&stop, 0).unwrap() != 0,
+            |result| {
+                let m = serde_json::to_string(&result).unwrap();
+                let m = JsValue::from_str(&m);
+                self.partial.call1(&JsValue::NULL, &m).unwrap();
+            },
+        );
         m.map(|m| serde_json::to_string(&m).unwrap())
-    }
-
-    pub fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
     }
 }
 
 #[wasm_bindgen_test]
 fn test_basic_engine() {
-    let engine = Engine::new(js_sys::Function::default());
+    let engine = Engine::new(
+        js_sys::Uint8Array::new_with_length(1),
+        js_sys::Function::default(),
+    );
     // does not terminate.
     println!(
         "{:?}",

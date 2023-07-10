@@ -11,12 +11,13 @@ module.exports = {
   plugins: [
     new CopyWebpackPlugin(['index.html'])
   ],
-  module: {
-    rules: [
-      {
-        test: /\.wasm$/,
-        type: "asset/inline",
-      }
-    ]
+  experiments: {
+    asyncWebAssembly: true
+  },
+  devServer: {
+    headers: {
+      "Cross-Origin-Embedder-Policy": "require-corp",
+      "Cross-Origin-Opener-Policy": "same-origin",
+    },
   }
 };
