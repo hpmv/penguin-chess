@@ -113,7 +113,7 @@ impl Board2 {
     }
 
     pub fn ended(self) -> bool {
-        (self.data >> 40) & 0x11111 == 12 || (self.data >> 45) & 0x11111 == 12
+        (self.data >> 40) & 0b11111 == 12 || (self.data >> 45) & 0b11111 == 12
     }
 
     pub fn do_move(self, m: Move) -> Self {
@@ -142,6 +142,9 @@ impl Board2 {
     }
 
     pub fn all_moves(self) -> Vec<(Move, Board2)> {
+        if self.ended() {
+            return Vec::new();
+        }
         let mut moves = Vec::new();
         let flat = self.flatten_to_bitarray();
         let offsets = if self.maximizing() {
@@ -179,19 +182,30 @@ impl Board2 {
                     from: from as u8,
                     to,
                 };
-                moves.push((m, self.do_move(m)));
+                let board = self.do_move(m);
+                if board.ended() {
+                    return vec![(m, board)];
+                }
+                moves.push((m, board));
             }
         }
         moves
     }
 
     const CELL_WEIGHTS_PAWN: [i32; 25] = [
-        0, 3, 0, 3, 0, 3, 25, 25, 25, 3, 0, 25, 0, 25, 0, 3, 25, 25, 25, 3, 0, 3, 0, 3, 0,
+        0, 3, 0, 3, 0, //
+        3, 25, 25, 25, 3, //
+        0, 25, 0, 25, 0, //
+        3, 25, 25, 25, 3, //
+        0, 3, 0, 3, 0,
     ];
 
     const CELL_WEIGHTS_KING: [i32; 25] = [
-        10, 0, 10, 0, 10, 0, 50, 50, 50, 0, 10, 50, 100000, 50, 10, 0, 50, 50, 50, 0, 10, 0, 10, 0,
-        10,
+        10, 0, 10, 0, 10, //
+        0, 200, 200, 200, 0, //
+        10, 200, 100000, 200, 10, //
+        0, 200, 200, 200, 0, //
+        10, 0, 10, 0, 10,
     ];
 
     pub fn score(&self) -> i32 {
@@ -547,3 +561,15 @@ const MOVEMENT_TABLE: [[[u8; 4]; 8]; 32] = [
     nil2,
     nil2,
 ];
+
+#[test]
+fn test_all_moves_when_almost_win() {
+    let board = Board2::from_positions(&vec![3, 4, 7, 16, 13, 17, 18, 24, 8, 0, 1]);
+    println!("{:?}", board.all_moves());
+}
+
+#[test]
+fn test_ended() {
+    let board = Board2::from_positions(&vec![3, 4, 7, 16, 13, 17, 18, 24, 12, 0, 0]);
+    assert!(board.ended());
+}

@@ -4,9 +4,10 @@ pub mod cell;
 pub mod player;
 
 use board2::{Board2, Move};
+use itertools::Itertools;
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     rc::Rc,
     sync::{
@@ -37,23 +38,31 @@ impl Debug for SearchResult {
 struct SearchState {
     transposition_table: HashMap<Board2, (i32, Move)>,
     next_transposition_table: HashMap<Board2, (i32, Move)>,
+    being_searched: HashSet<Board2>,
     nodes_searched: usize,
     max_depth: usize,
     max_transposition_table_depth: usize,
     stop: Box<dyn Fn() -> bool>,
+    collect_first_move_scores: bool,
 }
 
 struct Interrupted;
 
 impl SearchState {
-    pub fn new(stop: Box<dyn Fn() -> bool>) -> SearchState {
+    pub fn new(
+        stop: Box<dyn Fn() -> bool>,
+        collect_first_move_scores: bool,
+        history_states: Vec<Board2>,
+    ) -> SearchState {
         SearchState {
             transposition_table: HashMap::new(),
             next_transposition_table: HashMap::new(),
+            being_searched: history_states.into_iter().collect(),
             nodes_searched: 0,
             max_depth: 0,
-            max_transposition_table_depth: 8,
+            max_transposition_table_depth: 20,
             stop,
+            collect_first_move_scores,
         }
     }
 
@@ -82,6 +91,7 @@ impl SearchState {
         let mut best_score = if maximizing { i32::MIN } else { i32::MAX };
 
         let mut moves = state.all_moves();
+        moves.retain(|(_, board)| !self.being_searched.contains(&board));
         if moves.is_empty() {
             return Ok(SearchResult {
                 score: if maximizing { -100000 } else { 100000 },
@@ -103,6 +113,7 @@ impl SearchState {
             }
         });
 
+        self.being_searched.insert(state);
         let mut first_move_scores = Vec::new();
         for (one_move, next_state) in moves.into_iter() {
             let SearchResult {
@@ -116,7 +127,7 @@ impl SearchState {
                     best_path = best_subpath;
                     best_path.push(one_move);
                 }
-                if score > alpha {
+                if score > alpha && (!self.collect_first_move_scores || depth > 0) {
                     alpha = score;
                 }
             } else {
@@ -125,11 +136,11 @@ impl SearchState {
                     best_path = best_subpath;
                     best_path.push(one_move);
                 }
-                if score < beta {
+                if score < beta && (!self.collect_first_move_scores || depth > 0) {
                     beta = score;
                 }
             }
-            if depth == 0 {
+            if depth == 0 && self.collect_first_move_scores {
                 first_move_scores.push((one_move, score));
             }
             if alpha >= beta {
@@ -137,11 +148,14 @@ impl SearchState {
             }
         }
         if depth < self.max_transposition_table_depth {
-            self.next_transposition_table.insert(
-                state.clone(),
-                (best_score, best_path.last().copied().unwrap()),
-            );
+            if self.next_transposition_table.len() < 30000000 {
+                self.next_transposition_table.insert(
+                    state.clone(),
+                    (best_score, best_path.last().copied().unwrap()),
+                );
+            }
         }
+        self.being_searched.remove(&state);
 
         Ok(SearchResult {
             score: best_score,
@@ -166,6 +180,7 @@ impl SearchState {
 pub struct PartialSearchResult {
     pub depth: usize,
     pub nodes_searched: usize,
+    pub transposition_table_size: usize,
     pub result: SearchResult,
 }
 
@@ -173,8 +188,11 @@ pub fn find_best_move(
     state: Board2,
     stop: impl Fn() -> bool + 'static,
     partial: impl Fn(PartialSearchResult),
+    collect_first_move_scores: bool,
+    history_states: Vec<Board2>,
 ) -> Option<Move> {
-    let mut search_state = SearchState::new(Box::new(stop));
+    let mut search_state =
+        SearchState::new(Box::new(stop), collect_first_move_scores, history_states);
     let mut result: Option<SearchResult> = None;
     loop {
         search_state.next_depth();
@@ -187,6 +205,7 @@ pub fn find_best_move(
                 partial(PartialSearchResult {
                     depth,
                     nodes_searched: search_state.nodes_searched,
+                    transposition_table_size: search_state.next_transposition_table.len(),
                     result: one_result.clone(),
                 });
                 let win_found = one_result.score.abs() > 10000;
@@ -216,7 +235,12 @@ impl Engine {
         }
     }
 
-    pub fn find_best_move(&self, state: Vec<u8>) -> Option<String> {
+    pub fn find_best_move(
+        &self,
+        state: Vec<u8>,
+        collect_first_move_scores: bool,
+        history_states: Vec<u8>,
+    ) -> Option<String> {
         let state = Board2::from_positions(&state);
         let stop = self.stop.clone();
         let m = find_best_move(
@@ -227,6 +251,13 @@ impl Engine {
                 let m = JsValue::from_str(&m);
                 self.partial.call1(&JsValue::NULL, &m).unwrap();
             },
+            collect_first_move_scores,
+            history_states
+                .into_iter()
+                .chunks(11)
+                .into_iter()
+                .map(|s| Board2::from_positions(&s.collect()))
+                .collect(),
         );
         m.map(|m| serde_json::to_string(&m).unwrap())
     }
@@ -241,7 +272,7 @@ fn test_basic_engine() {
     // does not terminate.
     println!(
         "{:?}",
-        engine.find_best_move(vec![0, 1, 3, 4, 20, 21, 23, 24, 22, 2, 1])
+        engine.find_best_move(vec![0, 1, 3, 4, 20, 21, 23, 24, 22, 2, 1], false, vec![])
     );
 }
 

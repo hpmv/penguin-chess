@@ -1,5 +1,4 @@
-import { Engine } from "wynn";
-// import wasm from "../pkg/wynn_bg.wasm";
+import { Engine } from "penguin";
 
 self.onmessage = ({ data: msg }) => {
     console.log(msg);
@@ -7,8 +6,12 @@ self.onmessage = ({ data: msg }) => {
         new Uint8Array(msg.stop),
         (data) => {
             console.log(data);
+            self.postMessage({ info: data });
         });
 
-    console.log(engine.find_best_move(new Uint8Array(msg.search)));
-
+    const move = engine.find_best_move(new Uint8Array(msg.search), msg.collectFirstMoveScores, msg.historyStates);
+    console.log(move);
+    self.postMessage({
+        move,
+    });
 }

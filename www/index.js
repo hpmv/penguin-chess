@@ -1,17 +1,8 @@
-const worker = new Worker(new URL("./worker.js", import.meta.url));
+import { App } from "./app";
+import React from "react";
+import ReactDOM from "react-dom/client";
 
-window.doSearch = function doSearch() {
-    const stop = new SharedArrayBuffer(1);
-    worker.postMessage({
-        search: [0, 1, 3, 4, 20, 21, 23, 24, 22, 2, 1],
-        stop,
-    });
+window.worker = new Worker(new URL("./worker.js", import.meta.url));
 
-    setTimeout(() => {
-        new Uint8Array(stop)[0] = 1;
-    }, 2000);
-}
-
-worker.onmessage = (msg) => {
-    console.log(msg);
-};
+const root = ReactDOM.createRoot(document.getElementById('app'));
+root.render(React.createElement(App));
